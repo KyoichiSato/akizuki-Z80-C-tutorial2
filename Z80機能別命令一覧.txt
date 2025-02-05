@@ -1,0 +1,123 @@
+8ビット・ロード
+        LD r,s		r,n,(HL),(IX+e),(IY+e)	r:レジスタ	
+        LD d,r		r,(HL),(IX+e),(IY+e)	n,nn:即値	
+        LD d,n		(HL),(IX+e),(IY+e)	s,ss:ソース	
+        LD A,s		(BC),(DE),(nn),I,R	d,dd:デストネーション	
+        LD d,A		(BC),(DE),(nn),I,R		
+16ビット・ロード
+        LD dd,nn	BC,DE,HL,SP,IX,IY		
+        LD dd,(nn)	BC,DE,HL,SP,IX,IY		
+        LD (nn),ss	BC,DE,HL,SP,IX,IY		
+        LD SP,ss	HL,IX,IY		
+        PUSH ss		BC,DE,HL,AF,IX,IY		
+        POP dd		BC,DE,HL,AF,IX,IY		
+交換
+        EX DE,HL				
+        EX AF,AF'				
+        EXX		        BC,DE,HL⇔BC',DE',HL'			
+        EX SP,ss	HL,IX,IY		
+8ビット演算
+        ADD A,s		r,n,(HL),(IX+e),(IY+e)		
+        ADC A,s		r,n,(HL),(IX+e),(IY+e)		
+        SUB s		r,n,(HL),(IX+e),(IY+e)		
+        SBC A,s		r,n,(HL),(IX+e),(IY+e)		
+        AND s		r,n,(HL),(IX+e),(IY+e)		
+        OR s		r,n,(HL),(IX+e),(IY+e)		
+        XOR s		r,n,(HL),(IX+e),(IY+e)		
+        CP s		r,n,(HL),(IX+e),(IY+e)	A-s Aの内容は不変でフラグのみ変化		
+        INC d		r,(HL),(IX+e),(IY+e)		
+        DEC d		r,(HL),(IX+e),(IY+e)		
+16ビット演算
+        ADD HL,ss	BC,DE,HL,SP		
+        ADC HL,ss	BC,DE,HL,SP		
+        SBC HL,ss	BC,DE,HL,SP		
+        ADD IX,ss	BC,DE,IX,SP		
+        ADD IY,ss	BC,DE,IY,SP		
+        INC dd		BC,DE,HL,SP,IX,IY		
+        DEC dd		BC,DE,HL,SP,IX,IY		
+アキュムレータフラグ操作
+        DAA	10進補正			
+        CPL	A = ~A			
+        NEG	A = 0 - A			
+        CCF	CY = ~CY			
+        SCF	CY = 1			
+メモリブロック転送
+        LDI	(DE) = (HL), DE++, HL++, BC--			
+        LDIR	LDIを BC = 0 まで繰り返す	BC=1で1バイト転送, BC=0で0xFFFFバイト転送	
+        LDD	(DE) = (HL), DE--, HL--, BC--			
+        LDDR	LDDを BC = 0 まで繰り返す			
+メモリブロックサーチ
+        CPI	A - (HL), HL++, BC--			
+        CPIR	CPIを BC = 0 または A = (HL)まで繰り返す			
+        CPD	A - (HL), HL--, BC--			
+        CPDR	CPDを BC = 0 または A = (HL)まで繰り返す			
+CPU制御
+        NOP				
+        HALT				
+        DI	割り込み禁止			
+        EI	割り込み許可			
+        IM 0	割り込みモード0			
+        IM 1	割り込みモード1			
+        IM 2	割り込みモード2			
+シフト・ローテート
+        RLC s	左ローテート		r,(HL),(IX+e),(IY+e)		
+        RL s	左ローテートCY付	r,(HL),(IX+e),(IY+e)		
+        RRC s	右ローテート		r,(HL),(IX+e),(IY+e)		
+        RR s	右ローテートCY付	r,(HL),(IX+e),(IY+e)		
+        SLA s	左シフトbit0=0		r,(HL),(IX+e),(IY+e)		
+        SRA s	右シフト符号ビット不変	r,(HL),(IX+e),(IY+e)		
+        SRL s	右シフトbit7=0		r,(HL),(IX+e),(IY+e)		
+        RLD	BCDの左ローテート			
+        RRD	BCDの右ローテート			
+ビット操作
+        BIT b,s	sのbビットをゼロフラグにセットする	r,(HL),(IX+e),(IY+e)	b:ビット位置	
+        SET b,s	sのbビットを1	r,(HL),(IX+e),(IY+e)		
+        RES b,s	sのbビットを0	r,(HL),(IX+e),(IY+e)		
+I/O
+        IN A,(n)				
+        IN r,(C)	r = (BC)			
+        INI		(HL) = (B), HL++, B--			
+        INIR		INIを B = 0まで繰り返す			
+        IND		(HL) = (B), HL--, B--			
+        INDR		INDを B=0 まで繰り返す			
+        OUT (n),A				
+        OUT (C),r	(BC) = r			
+        OUTI		(C) = (HL), HL++, B--			
+        OTIR		OUTIを B = 0 まで繰り返す			
+        OUTD		(C) = (HL), HL--, B--			
+        OTDR		OUTDを B = 0 まで繰り返す			
+ジャンプ
+        JP nn				
+        JP cc,nn	NZ,Z,NC,C,PO,PE,P,M
+        JR e				
+                                        
+        JR kk,e		NZ,Z,NC,C		
+                                        
+        JP (ss)		HL,IX,IY		
+        DJNZ e		B--, Bが0以外ならジャンプ
+
+        cc:コンディションコード
+                Z:ゼロ
+                NZ:ノンゼロ
+                C:キャリー
+                NC:ノンキャリー
+                PO:奇数
+                PE:偶数
+                P:正
+                M:負
+コール
+        CALL nn				
+        CALL cc,nn	NZ,Z,NC,C,PO,PE,P,M		
+リスタート
+        RST L		00H,08H,10H,18H,20H,28H,30H,38H		
+リターン
+        RET				
+        RET cc		NZ,Z,NC,C,PO,PE,P,M		
+        RETI	割り込みから復帰, RET+割り込みデイジーチェーン制御	(割り込み発生時は割り込み禁止してからジャンプする。RETIでは割り込み許可しない。)
+        RETN	NMIからの復帰, RET+割り込みイネーブルフリップフロップをNMI発生前の状態に戻す	(NMI発生時割り込み禁止されるが、NMIが発生すると再度割り込みが受け付けられる。)
+                                        
+
+命令によって使えるレジスタが違うので、機能別命令一覧を作りました。
+
+参考資料
+シャープ マイクロコンピュータ Z80 ユーザーズマニュアル Part1					

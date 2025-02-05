@@ -1,0 +1,780 @@
+;
+; CP/M / MSX-DOS ファンクションコールラップ関数
+;
+; This code is provided under a CC0 Public Domain License.
+; http://creativecommons.org/publicdomain/zero/1.0/
+; 
+; 2024年12月11日 作成 佐藤恭一 kyoutan.jpn.org
+;
+
+        GLOBAL	__GETSPREG, __GETENDADDR
+        GLOBAL	_CPMRESET, _CPMGETC, _CPMPUTC, _CPMAUXGETC, _CPMAUXPUTC
+        GLOBAL	_CPMPRNPUTC, _CPMCONIO, _CPMCONPUTC, _CPMRAWGETC
+        GLOBAL	_CPMPUTS, _CPMGETS, _CPMKBDHIT, _CPMVER
+        GLOBAL	_CPMDSKRESET, _CPMSETDRIVE
+        GLOBAL	_CPMOPEN, _CPMCLOSE, _CPMFIND, _CPMFINDNEXT, _CPMDEL
+        GLOBAL	_CPMSEQREAD, _CPMSEQWRITE, _CPMCREATE ,_CPMREN
+        GLOBAL	_CPMLOGINVEC, _CPMGETDRIVE, _CPMSETDTA, _CPMDISKINFO
+        GLOBAL	_CPMRNDREAD, _CPMRNDWRITE,_CPMFILESIZE
+        GLOBAL	_CPMCURRENTFIELD, _CPMBLOCKWRITE, _CPMBLOCKREAD
+        GLOBAL	_CPMRNDWRITEZ, _CPMGETDATE, _CPMSETDATE, _CPMGETTIME, _CPMSETTIME
+        GLOBAL	_CPMVERIFY, _CPMSECTREAD, _CPMSECTWRITE
+
+        EXTNAL	_STACK_END
+
+BDOS	EQU	0005H
+C_CPM	SECT    CODE
+
+;----------------------------------------------------------------------
+; XCC-V 関数呼び出し規約
+;
+; Cから呼ばれる関数では SPとIXを破壊してはいけない。
+; 引数は右から順にスタックに積まれてコールされる
+; 戻り値は BCレジスタで返す
+;
+; 関数呼び出しの例
+; func(arg1, arg2, arg3);　のとき
+;
+;       PUSH arg3
+;       PUSH arg2
+;       PUSH arg1
+;       CALL _FUNC
+; ADDR: POP xx
+;       POP xx 関数から戻ってきたら
+;       POP xx 引数をPUSHしたのと同じだけPOPしてスタックをもとに戻す
+;
+; CALL命令は CALL命令の次のアドレスをスタックに PUSHしてからジャンプする
+; PUSH命令は SP-2してから SP+0に値L、 SP+1に値H を格納する
+; POP命令は SP+0から値L、SP+1から値H を取り出してから SP+2する。
+; Cから関数を呼ばれた直後のスタックの状態は
+; SP+0 リターンアドレス L
+; SP+1 リターンアドレス H
+; SP+2 arg1 L
+; SP+3 arg1 H
+; SP+4 arg2 L
+; SP+5 arg2 H
+; SP+6 arg3 L
+; SP+7 arg3 H
+;
+; 引数を取り出すために
+; PUSH IX を実行してフレームポインタ IXを退避すると
+; SP+0 IX L
+; SP+1 IX H
+; SP+2 リターンアドレス L
+; SP+3 リターンアドレス H
+; SP+4 arg1 L
+; SP+5 arg1 H
+; SP+6 arg2 L
+; SP+7 arg2 H
+; SP+8 arg3 L
+; SP+9 arg3 H
+; となるので IXにSPをロードして
+; LD L,(IX+4)
+; LD H,(IX+5)
+; のようにして1つ目の引数を取り出すことができる
+
+;----------------------------------------------------------------------
+
+; Aレジスタの下位4ビットを16進の文字一文字に変換してAレジスタにセットする
+; 使用レジスタ A,B
+hexchar:
+        AND     0FH     ; A=A&0x0F 上位4ビットをゼロにする
+        LD      B,A     ; A退避
+        SUB     9     
+        JR      NC,L100$ ; 9より大きくないときジャンブ
+        ; 0-9のとき
+        LD      A,B     ; A復帰
+        ADD     A,'0'   ; A=A+'0'
+        RET
+L100$:  ; 10-Fのとき
+        LD      A,B     ; A復帰
+                           ; A=A-10+'A' を並べ替えて↓
+        ADD     A,'A'-10   ; A=A+('A'-10)
+        RET
+
+; Aレジスタの値を16進2文字で表示する
+puthex:
+        LD      E,A     ; A退避
+        SRL     A
+        SRL     A
+        SRL     A
+        SRL     A ; 4ビット右シフト上位ビットは0
+        CALL    hexchar
+        LD      (L200$),A
+        LD      A,E     ; A復帰
+        CALL    hexchar
+        LD      (L200$+1),A
+        LD      HL,L200$+2
+        LD      (HL),'$'
+
+        LD      DE,L200$
+        LD      C,09H   ; 文字列出力
+        CALL    BDOS
+        RET
+L200$:
+        DS      3
+
+; HLレジスタの値を16進4文字で表示する
+putshort:
+        PUSH    HL
+        LD      A,H
+        CALL    puthex
+        POP     HL
+        LD      A,L
+        CALL    puthex
+        RET
+
+;スペースを一文字表示する
+putspace:
+        LD      E,' '
+        LD      C,02H
+        CALL    BDOS
+        RET
+
+; スタックポインタの値を返す (SP-2)
+__GETSPREG:
+        LD      HL,0
+        ADD     HL,SP   ; HL=SP
+        LD      B,H
+        LD      C,L     ; BC=HL
+;        PUSH    BC
+;        CALL    putshort
+;        CALL    putspace
+;        POP     BC
+        RET
+
+; スタックエリアの最終アドレス+2
+; （スタートアッププログラムで設定する SPの初期値）を取得する
+__GETENDADDR:
+        LD	BC,_STACK_END ; 戻り値はBCレジスタを使う
+        RET
+
+; CP/M ウォームリセット
+_CPMRESET:
+        LD	C,00H
+        CALL	BDOS    ; (OSをリスタートするので、戻ってこない)
+        RET
+        
+; CP/M コンソール入力
+_CPMGETC:
+        PUSH	IX      ; BDOSコールでIXが破壊されるかもしれないので、退避しておく
+        LD	C,01H
+        CALL	BDOS
+        LD	C,A	; A入力文字
+                        ; C関数の戻り値は C/BC/BC,DEを使う
+        POP	IX	; IX, SPを破壊してはいけない
+        RET
+
+; CP/M コンソール出力
+_CPMPUTC:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP フレームポインタの設定
+
+                                ; (IX+4) 1つ目の引数 下位1バイト
+                                ; （char型でも引数をスタックに積む関係で2バイト分の空間を使う）
+        LD	E,(IX+4)	; E出力文字
+        LD	C,02H
+        CALL	BDOS
+        POP	IX
+        ; ローカル変数などのためにSPを変更していたらもとに戻してからリターンする
+        RET
+
+; CP/M 補助入力
+_CPMAUXGETC:
+        PUSH	IX
+        LD	C,03H
+        CALL	BDOS
+        LD	C,A
+        POP	IX
+        RET
+
+; CP/M 補助出力
+_CPMAUXPUTC:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP フレームポインタの設定
+        LD	E,(IX+4)	; (IX+4) 1つ目の引数 下位1バイト
+        LD	C,04H
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M プリンタ出力
+_CPMPRNPUTC:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP フレームポインタの設定
+        LD	E,(IX+4)	; (IX+4) 1つ目の引数 下位1バイト
+        LD	C,05H
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M 直接コンソール入出力
+_CPMCONIO:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP フレームポインタの設定
+        LD	E,(IX+4)	; (IX+4) 1つ目の引数 下位1バイト
+        LD	C,06H
+        CALL	BDOS
+        LD	C,A	; 戻り値
+        POP	IX
+        RET
+
+; MSX-DOS 直接コンソール入力
+;※MSXのみ
+_CPMCONPUTC:
+        PUSH	IX
+        LD	C,07H
+        CALL	BDOS
+        LD	C,A	; 戻り値
+        POP	IX
+        RET
+
+; MSX-DOS エコーなしコンソール入力
+; ※MSXのみ
+_CPMRAWGETC:
+        PUSH	IX
+        LD	C,08H
+        CALL	BDOS
+        LD	C,A	; 戻り値
+        POP	IX
+        RET
+
+; CP/M 文字列出力
+_CPMPUTS:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; フレームポインタの設定
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+                        ; DE 出力文字列の先頭アドレス 文字列の終端'$' C言語の終端と異なるので注意
+        LD	C,09H
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M 文字列入力
+_CPMGETS:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; フレームポインタの設定
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+                                ; DE 行バッファの先頭アドレス 文字列の終端'$' C言語の終端と異なるので注意
+        LD	A,(IX+6)	; 2つ目の引数 下位
+                                ; 最大入力文字数
+        LD	(DE),A  ; 最大入力文字数を行バッファ先頭にセット
+        PUSH	DE
+        LD	C,0AH
+        CALL	BDOS
+        POP	HL	; HL 行バッファ先頭アドレス
+        INC	HL
+        LD	C,(HL)	; 戻り値 入力された文字数（行バッファ先頭+1に入っている）
+        POP	IX
+        RET
+
+; CP/M コンソール入力状態のチェック
+_CPMKBDHIT:
+        PUSH	IX
+        LD	C,0BH
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:入力バッファは空 FFH:バッファにデータあり
+        POP	IX
+        RET
+
+; CP/M バージョン番号の獲得
+_CPMVER:
+        PUSH	IX
+        LD	C,0CH
+        CALL	BDOS
+        LD	B,H	; HL バージョン番号
+        LD	C,L	; C関数の戻り値は C/BC/BC,DEを使う
+        POP	IX	; IX, SPを破壊してはいけない
+        RET
+
+; CP/M ディスクリセット
+_CPMDSKRESET:
+        PUSH	IX
+        LD	C,0DH
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M デフォルトドライブの設定
+_CPMSETDRIVE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+                                ; デフォルトドライブ番号 0:A 1:B ...
+        LD	C,0EH
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M ファイルのオープン
+_CPMOPEN:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,0FH
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M ファイルのクローズ
+_CPMCLOSE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,10H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M ファイルの検索（最初の一致）
+_CPMFIND:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,11H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:ファイルが見つかった FFH:見つからなかった
+        POP	IX
+        RET
+
+; CP/M ファイルの検索（後続の一致）
+_CPMFINDNEXT:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	C,12H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:ファイルが見つかった FFH:見つからなかった
+        POP	IX
+        RET
+
+; CP/M ファイルの削除
+_CPMDEL:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,13H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M シーケンシャルリード
+_CPMSEQREAD:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,14H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 01H:失敗
+        POP	IX
+        RET
+
+; CP/M シーケンシャルライト
+_CPMSEQWRITE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,15H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 01H:失敗
+        POP	IX
+        RET
+
+; CP/M ファイルの作成
+_CPMCREATE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,16H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M ファイル名の変更
+_CPMREN:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,17H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M ログインベクトルの獲得
+_CPMLOGINVEC:
+        PUSH	IX
+        LD	C,18H
+        CALL	BDOS
+        LD	B,H	;
+        LD	C,L	; 戻り値 オンラインドライブ情報
+        POP	IX
+        RET
+
+; CP/M デフォルトドライブ番号の獲得
+_CPMGETDRIVE:
+        PUSH	IX
+        LD	C,19H
+        CALL	BDOS
+        LD	C,A	; 戻り値 デフォルトドライブ番号 0:A 1:B ...
+        POP	IX
+        RET
+
+; CP/M 転送先アドレス (DTA) の設定
+; DTA初期値は 0080H
+_CPMSETDTA:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,1AH
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M ディスク情報の獲得
+; ※MSX-DOSのみ
+; void CPMDISKINFO(unsigned char drive, char *result);
+_CPMDISKINFO:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のchar引数
+                                ; ドライブ番号 0:デフォルト 1:A 2:B ...
+
+        LD	L,(IX+6)	; (IX+6) 2つ目のshort引数 下位
+        LD	H,(IX+7)	; (IX+7) 2つ目のshort引数 上位
+                                ; 結果格納先アドレス
+
+        PUSH	HL              ; 結果格納アドレス保存
+        LD	C,1BH
+        CALL	BDOS
+        PUSH	IY	; すべてのレジスタに値をセットして戻ってくるので	
+        PUSH	IX	; 転送のために一旦スタックに退避
+        PUSH	HL
+        PUSH	DE
+        PUSH	BC
+        PUSH	AF
+        ; SP
+        ; |
+        ; FACBEDLHXIYI
+        ;  A 1クラスタあたりの論理セクタ数
+        ; BC セクタのサイズ（byte）
+        ; DE クラスタの総数
+        ; HL 未使用クラスタの総数
+        ; IX DPBの先頭アドレス
+        ; IY FATバッファの先頭アドレス
+
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+        PUSH	IX
+        POP	BC	; BC=IX 転送元アドレス一時保存
+        INC	BC	; +1してフラグレジスタの分を読み飛ばし
+
+        ; SP=SP+12
+        LD	HL,12
+        ADD	HL,SP
+        LD	SP,HL	; CALL前にスタックを戻す
+
+        LD	H,B
+        LD	L,C	; HL=BC 転送元
+        POP	DE	; DE 転送先
+        LD	BC,11	; BC 転送サイズ （1なら1バイト転送、0ならFFFFHバイト転送）
+        LDIR	; (DE)=(HL), INC DE, INC HL, DEC BC,BCが0でなければ繰り返す
+
+        POP	IX
+        RET
+
+; CP/M ランダムな読み出し
+; unsigned char CPMRNDREAD(char *FCB);
+_CPMRNDREAD:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,21H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 01H:失敗
+        POP	IX
+        RET
+
+; CP/M ランダムな書き込み
+; unsigned char CPMRNDWRITE(char *FCB);
+_CPMRNDWRITE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,22H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 01H:失敗
+        POP	IX
+        RET
+
+; CP/M ファイルサイズの獲得
+; unsigned char CPMFILESIZE(char *FCB);
+_CPMFILESIZE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,23H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M ランダムレコードフィールドの設定
+; void CPMCURRENTFIELD (char *FCB);
+_CPMCURRENTFIELD:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,24H
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M ランダムブロック書き込み
+;※MSX-DOSのみ
+; unsigned char CPMBLOCKWRITE(char *FCB, unsigned short RECORD);
+_CPMBLOCKWRITE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	L,(IX+6)	; (IX+6) 2つ目のshort引数 下位
+        LD	H,(IX+7)	; (IX+7) 2つ目のshort引数 上位
+        LD	C,26H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 01H:失敗
+        POP	IX
+        RET
+
+; CP/M ランダムブロック読み出し
+;※MSX-DOSのみ
+; unsigned char CPMBLOCKREAD(char *FCB, unsigned short *RECORD);
+_CPMBLOCKREAD:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,(IX+6)	; (IX+6) 2つ目のshort引数 下位
+        LD	B,(IX+7)	; (IX+7) 2つ目のshort引数 上位
+        LD	IY,0
+        ADD	IY,BC	; IY=BC
+        PUSH	IY
+        LD	L,(IY+0)
+        LD	H,(IY+1)	; HL=(BC)
+        LD	C,27H
+        CALL	BDOS
+        LD	C,A	; 戻り値 A 00H:成功 01H:失敗
+        POP	IY
+        LD	(IY+0),L
+        LD	(IY+1),H	; 戻り値 HL 実際に読み出したレコード数
+        POP	IX
+        RET
+
+; CP/M ランダムな書き込み（ゼロ埋め）
+; unsigned char CPMRNDWRITEZ(char *FCB);
+_CPMRNDWRITEZ:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	C,28H
+        CALL	BDOS
+        LD	C,A	; 戻り値 00H:成功 01H:失敗
+        POP	IX
+        RET
+
+; CP/M 日付の獲得
+; ※MSX-DOSのみ
+; void CPMGETDATE(char *date);
+_CPMGETDATE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        PUSH	DE	; 戻り値を書き込むアドレスを保存
+        LD	C,2AH
+        CALL	BDOS
+        ; 戻り値 HL:年（1980-2079） D:月（1-12） E:日（1-31） A:曜日（0=日曜,1=月曜,...,6=土曜）
+        POP	IX
+        LD	(IX+0),L
+        LD	(IX+1),H
+        LD	(IX+2),D
+        LD	(IX+3),E
+        LD	(IX+4),A
+        POP	IX
+        RET
+
+; CP/M 日付の設定
+; ※MSX-DOSのみ
+; void CPMSETDATE(unsigned short year, unsigned char month, unsigned char date);
+_CPMSETDATE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	L,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	H,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        LD	D,(IX+6)	; (IX+4) 2つ目のshort引数 下位
+        LD	E,(IX+8)	; (IX+5) 3つ目のshort引数 下位
+        LD	C,2BH
+        CALL	BDOS
+        LD	C,A	; 戻り値 A 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M 時刻の獲得
+; ※MSX-DOSのみ
+; void CPMGETTIME(char *time);
+_CPMGETTIME:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目のshort引数 上位
+        PUSH	DE	; 戻り値を書き込むアドレスを保存
+        LD	C,2CH
+        CALL	BDOS
+        ; 戻り値 H:時 L:分 D:秒 E:1/100秒
+        POP	IX
+        LD	(IX+0),H
+        LD	(IX+1),L
+        LD	(IX+2),D
+        LD	(IX+3),E
+        POP	IX
+        RET
+
+; CP/M 時刻の設定
+; ※MSX-DOSのみ
+; unsigned char CPMSETTIME(unsigned char hour, unsigned char minute, unsigned char second);
+_CPMSETTIME:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	H,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+        LD	L,(IX+6)	; (IX+4) 2つ目のshort引数 下位
+        LD	D,(IX+8)	; (IX+5) 3つ目のshort引数 下位
+        LD	C,2DH
+        CALL	BDOS
+        LD	C,A	; 戻り値 A 00H:成功 FFH:失敗
+        POP	IX
+        RET
+
+; CP/M ベリファイフラグの設定
+; ※MSX-DOSのみ
+; void CPMVERIFY(unsigned char flag);
+_CPMVERIFY:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目のshort引数 下位
+                                ; 00H:ベリファイしない 01H:ベリファイする
+        LD	C,2EH
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M 論理セクタの読み出し
+; ※MSX-DOSのみ
+; void CPMSECTREAD(unsigned short sect, unsigned char quantity, unsigned char drive);
+_CPMSECTREAD:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目の引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目の引数 上位
+        LD	H,(IX+6)	; (IX+6) 2つ目の引数 下位
+        LD	L,(IX+8)	; (IX+8) 3つ目の引数 下位
+        LD	C,2FH
+        CALL	BDOS
+        POP	IX
+        RET
+
+; CP/M 論理セクタの書き込み
+; ※MSX-DOSのみ
+; void CPMSECTWRTIE(unsigned short sect, unsigned char quantity, unsigned char drive);
+_CPMSECTWRITE:
+        PUSH	IX
+        LD	IX,0	;
+        ADD	IX,SP	; IX=SP
+
+        LD	E,(IX+4)	; (IX+4) 1つ目の引数 下位
+        LD	D,(IX+5)	; (IX+5) 1つ目の引数 上位
+        LD	H,(IX+6)	; (IX+6) 2つ目の引数 下位
+        LD	L,(IX+8)	; (IX+8) 3つ目の引数 下位
+        LD	C,30H
+        CALL	BDOS
+        POP	IX
+        RET
+
+
+        END
