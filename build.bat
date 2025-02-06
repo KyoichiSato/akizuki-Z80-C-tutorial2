@@ -25,27 +25,21 @@ SET XAS_MPUNAME=z80
 
 REM コンパイル
 IF "%OPTIMIZE%"=="ON" (
-xccv call_main.c -d -O o -w -LW1 -LE2 -ks
-xccv test.c -d -O o -w -LW1 -LE2 -ks
-xccv cpmstdio.c -d -O o -w -LW1 -LE2 -ks
+xccv tutorial_2.c -d -O o -w -LW1 -LE2 -ks
 ) ELSE (
-xccv call_main.c -d -w -LW1 -LE2 -ks
-xccv test.c -d -w -LW1 -LE2 -ks
-xccv cpmstdio.c -d -w -LW1 -LE2 -ks
+xccv tutorial_2.c -d -w -LW1 -LE2 -ks
 )
 
 REM アセンブル
 xassv startup.xas -da -a -r
-xassv call_main.xas -da -a -r
-xassv test.xas -da -a -r
+xassv tutorial_2.xas -da -a -r
 xassv cpm.xas -da -a -r
-xassv cpmstdio.xas -da -a -r
 
 REM リンク（リンク情報は .xlsファイルに記述する）
-xlnkv test.xls -l -m -d -s -o -p
+xlnkv tutorial_2.xls -l -m -d -s -o -p
 
 REM 出力オブジェクトをインテルHEX形式に変換
-xoutv test.xlo -d -t obj1,sym1 -l 
+xoutv tutorial_2.xlo -d -t obj1,sym1 -l 
 
 REM インテルHEXを MSX-DOS / CP/M の COMファイルに変換
-python hex2com.py test.xho
+python hex2com.py tutorial_2.xho

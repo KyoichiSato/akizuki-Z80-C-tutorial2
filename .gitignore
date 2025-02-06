@@ -7,5 +7,7 @@ tutorial_1.xas
 *.xlo
 *.inf
 *.xho
+*.com
+*.exe
 
 *.afdesign

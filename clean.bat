@@ -16,6 +16,4 @@ del *.inf
 del *.xho
 
 REM Cコンパイラが出力したアセンブラリストを削除
-del call_main.xas
-del test.xas
-del cpmstdio.xas
+del tutorial_2.xas
