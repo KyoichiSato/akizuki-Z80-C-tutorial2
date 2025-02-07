@@ -1,0 +1,50 @@
+;
+; リンクパラメータファイル
+; "C:\akiz80\LIB\z80\STARTUP\EXAMPLE.XLS" にあるサンプルをCP/M用に変更
+;
+; This code is provided under a CC0 Public Domain License.
+; http://creativecommons.org/publicdomain/zero/1.0/
+; 
+; 2024年12月11日 佐藤恭一 kyoutan.jpn.org
+
+;-------------------------------+
+;       RAM Area                |
+;-------------------------------+
+; CP/Mなので全部RAMに配置
+/ADDR=0100
+/SECT=C_START   ; 0100Hからスタートアッププログラムを配置
+/SECT=C_*|CODE
+/SECT=I_*
+/SECT=D_*|COMM          (data   =_DATA)
+/SECT=B_*|COMM          (bss    =_BSS)
+/init_section = _INIT_DATA      (_DATA)
+/SECT=_STACK    ; ヒープエリアのアドレスを決定するためにスタックのアドレスを使用するので、
+                ; スタックは末尾に配置する。
+
+;-------------------------------+
+;       ROM Area                |
+;-------------------------------+
+; CP/MなのでROMに配置しない
+;/ADDR=8000
+;/SECT=C_*|CODE
+;/SECT=I_*
+;-------------------------------+
+;       init data section       +
+;-------------------------------+
+;/init_section = _INIT_DATA     (_DATA)
+
+;-------------------------------+
+;       linkage module          |
+;-------------------------------+
+/Syslib=C:\akiz80\LIB\z80\CS\CSZE1.XLB          ; 基本？ライブラリ（計算や最適化で呼び出される）
+/Syslib=C:\akiz80\LIB\z80\STD\STDZE1.XLB        ; C言語の標準ライブラリ
+/Syslib=C:\akiz80\LIB\z80\MATH\MATZE1.XLB       ; 数学ライブラリ
+;リンカがかしこくて、システムライブラリは使用する関数のみリンクされる。
+;使用しない分はリンクされないので、システムライブラリは指定しっぱなしでよい。
+
+/Name=tutorial_2              ; 出力オブジェクト名
+/Entry_Name=startup     ; 実行開始オブジェクト名
+; リンクするオブジェクトを列記する。拡張子を省略すると ".xao"
+/Module=startup
+/Module=tutorial_2
+/Module=cpm
