@@ -38,7 +38,7 @@ C_CPM	SECT    CODE
 ;       PUSH arg3
 ;       PUSH arg2
 ;       PUSH arg1
-;       CALL _FUNC
+;       CALL _func
 ; ADDR: POP xx
 ;       POP xx 関数から戻ってきたら
 ;       POP xx 引数をPUSHしたのと同じだけPOPしてスタックをもとに戻す

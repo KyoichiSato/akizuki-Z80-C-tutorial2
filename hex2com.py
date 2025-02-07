@@ -1,34 +1,4 @@
 #
-"""
-HEX2COM
-Convert IntelHex files to MSX-DOS / CP/M COM files.
-This script reads an IntelHex file and converts it to a COM file format used by MSX-DOS and CP/M systems.
-Usage:
-    HEX2COM <filename> [-d] [-h]
-        -d Hexadecimal dump view
-        -h Show Help
-Arguments:
-    filename : str
-        The name of the IntelHex file to be converted.
-    -d : str
-        Option to display a hexadecimal dump of the file.
-    -h : str
-        Option to display help information.
-Functions:
-    usage():
-        Prints the usage information for the script.
-    main():
-        Main function that processes command line arguments, reads the IntelHex file, and converts it to a COM file.
-Notes:
-    - The script checks if the start address of the IntelHex file is 0x100. If not, it stops processing.
-    - The output COM file will have the same name as the input file but with a .com extension.
-License:
-    This code is provided under a CC0 Public Domain License.
-    http://creativecommons.org/publicdomain/zero/1.0/
-Author:
-    佐藤恭一 kyoutan.jpn.org
-    Date: 2024年12月03日
-"""
 # HEX2COM
 # IntelHexファイルを MSX-DOS / CP/M の COMファイルに変換する
 #
